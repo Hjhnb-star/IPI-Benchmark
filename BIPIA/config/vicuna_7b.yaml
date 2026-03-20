@@ -1,0 +1,3 @@
+load_8bit: False
+model_name: /data/hzq/models/vicuna1.5_7b
+llm_name: "vicuna"

@@ -1,0 +1,3 @@
+llm_name: llama2
+load_8bit: false
+model_name: /data/hzq/models/Llama-2-7b-chat-hf
