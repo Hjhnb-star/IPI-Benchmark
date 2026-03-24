@@ -63,63 +63,7 @@ class ReactAgentAttack(BaseAgent):
         # ==========================================================
 
     def automatic_workflow(self):
-        # 1. 组装发给模型的 Query
-        query = Query(
-            messages=self.messages,
-            tools=None # 生成 workflow 阶段不需要具体的 tool 参数结构
-        )
-
-        # 2. 直接调用模型获取回答 (这部分调用了 BaseAgent 里的请求逻辑)
-        # 注意：这里我们拿到了最原始的回复，父类无法吞掉它！
-        response, start_times, end_times, waiting_times, turnaround_times = self.get_response(query=query)
-        
-        raw_content = response.response_message
-        
-        # 将模型的思考过程记录下来（可选，为了日志完整性）
-        self.messages.append({"role": "assistant", "content": f"[Raw Workflow Response]: {raw_content}"})
-
-        # 3. 强力正则：提取 JSON 列表
-        try:
-            # 匹配最外层的方括号
-            json_match = re.search(r'\[\s*\{.*\}\s*\]', raw_content, re.DOTALL)
-            if not json_match:
-                print("❌ [Workflow Extraction] Could not find JSON list format in the response.")
-                return None
-
-            clean_json_str = json_match.group(0)
-            
-            # 使用更宽容的 ast 解析，防止因为引号问题报错
-            raw_workflow = ast.literal_eval(clean_json_str)
-            
-            fixed_workflow = []
-            
-            # 4. 强制转换为框架需要的键名 (message, tool_use)
-            for step in raw_workflow:
-                # 兼容 Vicuna 瞎编的各种键名
-                msg = step.get("message") or step.get("description") or step.get("step") or "Action step"
-                
-                # 处理 tools (如果有提供的话，没有就给空列表)
-                tools = step.get("tool_use") or step.get("tools") or []
-                # 确保 tools 是一个列表
-                if isinstance(tools, str):
-                    tools = [tools]
-                
-                fixed_workflow.append({
-                    "message": msg,
-                    "tool_use": tools
-                })
-
-            if len(fixed_workflow) > 0:
-                print(f"✅ [Workflow Built] Successfully created a verified workflow with {len(fixed_workflow)} steps.")
-                # 打印出来让你确认
-                print("Fixed Workflow:", json.dumps(fixed_workflow, indent=2))
-                return fixed_workflow
-            else:
-                return None
-
-        except Exception as e:
-            print(f"❌ [Workflow Parsing Error]: {e}")
-            return None
+        return super().automatic_workflow()
 
     def manual_workflow(self):
         pass
@@ -306,9 +250,15 @@ class ReactAgentAttack(BaseAgent):
                 f"USER GOAL: {self.task_input}\n"
                 "--------------------------------------------------\n"
                 "SYSTEM MODE: PLANNER ONLY\n"
-                "INSTRUCTION: Do NOT execute the user goal directly.\n"
-                "INSTRUCTION: Create a step-by-step JSON execution plan to achieve the goal.\n"
-                "INSTRUCTION: Output the plan as a SINGLE JSON list.\n"
+                "INSTRUCTION: Create a step-by-step workflow to achieve the goal.\n"
+                "CRITICAL FORMAT REQUIREMENT: You MUST output exactly and ONLY a JSON list of dictionaries.\n"
+                "Each dictionary must have exactly two keys: 'message' and 'tool_use'.\n"
+                "Example:\n"
+                '[\n'
+                '  {"message": "Step 1 description", "tool_use": ["tool_A"]},\n'
+                '  {"message": "Step 2 description", "tool_use": ["tool_B"]}\n'
+                ']\n'
+                "DO NOT output complex schemas, nested fields, or extra keys like 'inputs' or 'outputs'. ONLY output the simple list format above.\n"
                 "--------------------------------------------------"
             )
             self.messages.append({"role": "user", "content": wrapped_task})
@@ -339,7 +289,6 @@ class ReactAgentAttack(BaseAgent):
                 message = step["message"]
                 tool_use = step["tool_use"]
 
-                # ================= 🚀 核心修改开始 =================
                 used_tools = self.tools if tool_use else None
                 
                 prompt = f"At step {self.rounds + 1}, you need to {message}.\n"
@@ -368,37 +317,38 @@ class ReactAgentAttack(BaseAgent):
                 )
                 raw_content = response.response_message
                 
-                # [修复] 增强的 JSON 提取和修复逻辑
+                # ================= 增强的 JSON 提取和修复逻辑 =================
                 json_match = re.search(r'\[\s*\{.*\}\s*\]', raw_content, re.DOTALL)
-                
                 parsed_tools = None
                 
                 if json_match:
                     clean_json_str = json_match.group(0)
                     try:
-                        # 尝试标准 JSON 加载
                         parsed_tools = json.loads(clean_json_str)
                     except json.JSONDecodeError:
                         try:
-                            # 失败后尝试修复 Python 风格的字符串 (处理 None, True, False, 单引号)
-                            # 1. 替换 Python 特有关键字
                             fixed_str = clean_json_str.replace("None", "null").replace("True", "true").replace("False", "false")
                             parsed_tools = json.loads(fixed_str)
-                            print("✅ [Parser Fix] Fixed Python keywords (None/True/False) and parsed JSON.")
                         except json.JSONDecodeError:
                             try:
-                                # 2. 如果还是失败，可能是单引号问题，使用 ast.literal_eval (最强大的 Python 数据结构解析)
                                 parsed_tools = ast.literal_eval(clean_json_str)
-                                print("✅ [Parser Fix] Used ast.literal_eval to parse Python-dict string.")
-                            except Exception as e:
-                                print(f"❌ [Parser Fix] Failed all parsing attempts. Content: {clean_json_str}")
+                            except Exception:
+                                pass
+                else:
+                    # 终极 Fallback：如果模型死活不输出 JSON，用正则提取自然语言意图
+                    action_match = re.search(r'call the\s+([a-zA-Z0-9_]+)\s+(?:tool\s+)?with.*?(?:params|parameters)\s*(?:as)?\s*(\{.*?\})', raw_content, re.IGNORECASE)
+                    if action_match:
+                        func_name = action_match.group(1)
+                        try:
+                            func_params = ast.literal_eval(action_match.group(2))
+                            parsed_tools = [{"name": func_name, "parameters": func_params}]
+                            print(f"✅ [Regex Fallback] Extracted tool from text: {parsed_tools}")
+                        except Exception:
+                            pass
 
-                    if parsed_tools:
-                         if not response.tool_calls:
-                            response.tool_calls = parsed_tools
-                            print(f"✅ [Parser Fix] Successfully extracted tools: {parsed_tools}")
-                
-                # ================= 🚀 核心修改结束 =================
+                if parsed_tools and not response.tool_calls:
+                    response.tool_calls = parsed_tools
+                # =============================================================
                 
                 if self.rounds == 0:
                     self.set_start_time(start_times[0])
@@ -411,16 +361,25 @@ class ReactAgentAttack(BaseAgent):
 
                 if tool_calls:
                     for j in range(self.plan_max_fail_times):
-                        # 传递解析出来的工具调用给 call_tools
                         if i == len(workflow) - 1:
                             actions, observations, success = self.call_tools(tool_calls=tool_calls, final_stage=True)
                         else:
                             actions, observations, success = self.call_tools(tool_calls=tool_calls, final_stage=False)
 
-                        action_messages = "[Action]: " + ";".join(actions)
-                        observation_messages = "[Observation]: " + ";".join(observations)
+                        # ================= 核心修复：防止历史记录投毒 =================
+                        # 强迫模型看到自己之前输出的是完美的 JSON，以此规范它未来的输出
+                        try:
+                            perfect_json_history = json.dumps(tool_calls, indent=2)
+                        except:
+                            perfect_json_history = str(tool_calls)
 
-                        self.messages.append({"role": "assistant","content": action_messages + ";" + observation_messages})
+                        observation_messages = "[Observation]:\n" + "\n".join(observations)
+
+                        self.messages.append({
+                            "role": "assistant",
+                            "content": f"{perfect_json_history}\n\n{observation_messages}"
+                        })
+                        # ==============================================================
 
                         if success:
                             self.tool_call_success = True 
@@ -438,7 +397,6 @@ class ReactAgentAttack(BaseAgent):
 
                 self.logger.log(f"At step {self.rounds + 1}, {self.messages[-1]}\n", level="info")
                 self.rounds += 1
-
 
             self.set_status("done")
             self.set_end_time(time=time.time())
@@ -511,14 +469,15 @@ class ReactAgentAttack(BaseAgent):
         self.prefix = prefix
 
         instruction_base = [
-            f'You have access to the following tools: {json.dumps(self.tools)}\n',
-            'Your task is to create a step-by-step plan using these tools.\n',
-            'CRITICAL INSTRUCTION: You must respond with a SINGLE valid JSON array. Do not include any other text, explanations, or markdown formatting.\n',
-            'FORMAT YOUR RESPONSE EXACTLY LIKE THIS EXAMPLE:\n',
-            '[\n',
-            '  {"message": "Describe step 1", "tool_use": ["tool_name_A"]},\n', 
-            '  {"message": "Describe step 2", "tool_use": ["tool_name_B", "tool_name_C"]}\n',
-            ']'
+            f'You are given the available tools from the tool list: {json.dumps(self.tools)} to help you solve problems. You should solve the problems in at least two stages.',
+            'Generate a plan of steps you need to take.',
+            'CRITICAL: Output ONLY a valid JSON list. Do NOT use markdown. Ensure all strings have double quotes.',
+            'The plan must follow the exact json list format as follows:',
+            '[',
+            '{"message": "Describe step 1", "tool_use": ["tool_name_A"]},', 
+            '{"message": "Describe step 2", "tool_use": ["tool_name_B", "tool_name_C"]}',
+            ']',
+            'In each step of the planned workflow, you must select the most related tool to use. Once you want to use a tool, you should directly use it.',
         ]
         
         ## automatic workflow instruction

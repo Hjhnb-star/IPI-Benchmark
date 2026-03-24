@@ -75,7 +75,7 @@ cover/
 
 # Django stuff:
 
-local_settings.py
+ cal_settings.py
 db.sqlite3
 db.sqlite3-journal
 

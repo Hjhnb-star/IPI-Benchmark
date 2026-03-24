@@ -18,7 +18,7 @@ class HfNativeLLM(BaseLLM):
         """ fetch the model from huggingface and run it """
         self.max_gpu_memory = self.convert_map(self.max_gpu_memory)
 
-        # ================== 新增：拦截空字典 ==================
+        # ================== 拦截空字典 ==================
         if not self.max_gpu_memory:
             self.max_gpu_memory = None
         # ====================================================
@@ -31,7 +31,7 @@ class HfNativeLLM(BaseLLM):
             device_map="auto",
             max_memory=self.max_gpu_memory,
             use_auth_token = self.auth_token,
-            torch_dtype=torch.float16  # <====== 新增：开启半精度，防止真实 OOM
+            torch_dtype=torch.float16  # 开启半精度，防止真实 OOM
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
@@ -39,26 +39,29 @@ class HfNativeLLM(BaseLLM):
         )
         self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
-        # ================== 核心修复：Llama-2 正确的指令模板 ==================
+        # ================== 核心修复：完美的 Llama-2 指令模板 ==================
         if self.tokenizer.chat_template is None:
             self.tokenizer.chat_template = (
-                "{% set system_prompt = '' %}"
+                "{% set system_message = '' %}"
                 "{% for message in messages %}"
                 "{% if message['role'] == 'system' %}"
-                "{% set system_prompt = '<<SYS>>\\n' + message['content'] + '\\n<</SYS>>\\n\\n' %}"
+                "{% set system_message = '<<SYS>>\\n' + message['content'] + '\\n<</SYS>>\\n\\n' %}"
                 "{% endif %}"
                 "{% endfor %}"
+                
                 "{% for message in messages %}"
                 "{% if message['role'] == 'user' %}"
-                "{{ '[INST] ' + system_prompt + message['content'] + ' [/INST]' }}"
-                "{% set system_prompt = '' %}" # 确保只附加在第一个 user prompt 上
+                "{% if loop.first or (loop.index0 == 1 and messages[0]['role'] == 'system') %}"
+                "{{ '[INST] ' + system_message + message['content'] + ' [/INST]' }}"
+                "{% else %}"
+                "{{ '[INST] ' + message['content'] + ' [/INST]' }}"
+                "{% endif %}"
                 "{% elif message['role'] == 'assistant' %}"
                 "{{ message['content'] + ' ' }}"
                 "{% endif %}"
                 "{% endfor %}"
             )
         # ====================================================================
-
     def parse_tool_callings(self, result):
         pattern = r'\[\{.*?\}\]'
         matches = re.findall(pattern, result)

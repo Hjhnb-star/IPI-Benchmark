@@ -18,20 +18,24 @@ if __name__ == '__main__':
     injection_method = cfg['injection_method'] # 'direct_prompt_injection', 'memory_attack', 'observation_prompt_injection', 'clean'
     attack_types = cfg.get('attack_types', None)
 
-
-    for attack_tool_type in attack_tool_types:
+    for i, attack_tool_type in enumerate(attack_tool_types):
+        
+        # 核心修改：如果测试的是纯净模式(clean)，没必要去遍历agg, non-agg, all等工具集，跑一次外层就够了
+        if injection_method == 'clean' and i > 0:
+            continue
+            
         for llm in llms:
             for attack_type in attack_types:
-                backend=None
+                backend = None
                 if llm.startswith('gpt') or llm.startswith('gemini') or llm.startswith('claude'):
                     llm_name = llm
-                    backend=None
+                    backend = None
                 elif llm.startswith('ollama'):
                     llm_name = llm.split('/')[-1]
-                    backend='ollama'
+                    backend = 'ollama'
                 else:
                     llm_name = llm.strip('/').split('/')[-1] or llm
-                    backen='vllm'
+                    backen = 'vllm'
 
                 log_path = f'logs/{injection_method}/{llm_name}'
                 database = f'memory_db/direct_prompt_injection/{attack_type}_gpt-4o-mini'
@@ -51,9 +55,11 @@ if __name__ == '__main__':
                 log_file = f'{log_base}/{attack_type}-{attack_tool_type}'
                 os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
+                # 修改为调用 main_attacker1.py
+                base_cmd = f'''nohup python -u main_clean.py --llm_name {llm} --attack_type {attack_type} --attacker_tools_path {attacker_tools_path} --res_file {log_file}_{suffix}_clean.csv --max_new_tokens 1024'''
 
-                base_cmd = f'''nohup python -u main_attacker.py --llm_name {llm} --attack_type {attack_type} --use_backend {backend} --attacker_tools_path {attacker_tools_path} --res_file {log_file}_{suffix}_lora.csv'''
-
+                if backend is not None:
+                    base_cmd += f' --use_backend {backend}'
                 if database:
                     base_cmd += f' --database {database}'
                 if write_db:
@@ -76,8 +82,7 @@ if __name__ == '__main__':
                 else:
                     specific_cmd = ''
 
-                cmd = f"{base_cmd}{specific_cmd} > {log_file}_{suffix}_lora.log 2>&1 &"
+                cmd = f"{base_cmd}{specific_cmd} > {log_file}_{suffix}_clean.log 2>&1 &"
                 
-                print(f'{log_file}_{suffix}_lora.log')
+                print(f'{log_file}_{suffix}_clean.log')
                 os.system(cmd)
-
