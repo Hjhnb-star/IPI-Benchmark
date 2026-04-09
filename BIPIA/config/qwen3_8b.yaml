@@ -1,0 +1,6 @@
+load_8bit: False
+model_name: /data2/lhj/model/models--Qwen--Qwen3-8B
+template_name: "qwen"
+trust_remote_code: true
+enable_thinking: false
+llm_name: "qwen3"
