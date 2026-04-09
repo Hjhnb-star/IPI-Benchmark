@@ -20,6 +20,7 @@ __all__ = [
     "GPT4ALL",
     "Guanaco",
     "Llama2",
+    "Llama3",
 ]
 
 
@@ -89,4 +90,7 @@ class Guanaco(LLAMAModel):
 
 
 class Llama2(LLAMAModel):
+    require_system_prompt = False
+
+class Llama3(LLAMAModel):
     require_system_prompt = False
