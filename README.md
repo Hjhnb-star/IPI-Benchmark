@@ -1,26 +1,10 @@
-对于BIPIA数据集，他是分为两个部分，一个是inference（用于生成测试结果），一个是evaluate（用于评估结果），运行代码是在example下面的run.py
-指令如下：
-1.inference 指令
-nohup python -u examples/run.py \
-   --mode inference \
-   --dataset_name email \
-   --llm_config_file config/llama2_7b.yaml \ 
-   --context_data_file benchmark/email/test.jsonl \
-   --attack_data_file benchmark/text_attack_test.json \
-   --output_path results/email_llama2_detector_clean.jsonl \ #指向输出生成内容的文件
-   --batch_size 20 \
-   --seed 42 \
-   --log_steps 10 --resume >llama2_clean.log  2>&1 &
-2..用于evaluate指令
-nohup python -u /data3/hjh/BIPIA/examples/collect_clean_response_detector.py \
-   --mode evaluate \
-   --dataset_name email \
-   --response_path results/email_llama2_detector_clean.jsonl \ #指向生成内容的文件
-   --output_path /data3/hjh/BIPIA/results/email_llama2_detector_asr_clean.json \ #输出评估后的文件
-   --gpt_config_file config/gpt35.yaml \
-   --batch_size 20 \
-   --seed 42 \
-   --log_steps 10 --resume >lora.log 2>&1 &
+我更新添加了qwen3_8b.yaml和llama3_8b.yaml文件以及/data2/hjh/IPI-Benchmark/BIPIA/bipia/model/llama.py 和 /data2/hjh/IPI-Benchmark/BIPIA/bipia/model/qwen.py
+使用指令
+用于生成测试内容的结果指令：
+<img width="917" height="394" alt="image" src="https://github.com/user-attachments/assets/8ab97cf9-049d-4a10-9556-85b57373844c" />
+
+<img width="902" height="432" alt="image" src="https://github.com/user-attachments/assets/82410e2b-ca26-4600-9ba4-caf922f811e8" />
+
 
 
 对于InjecAgent数据集，指令如下：
