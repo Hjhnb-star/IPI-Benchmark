@@ -4,68 +4,116 @@ import torch
 from .constant import MODEL_CLASS
 from .base_llm import BaseLLM
 import time
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from pyopenagi.utils.chat_template import Response
 
 from ...utils.utils import get_from_env
 
 import re
+import json
 
 class HfNativeLLM(BaseLLM):
 
+    def build_prompt(self, messages, tools):
+        if tools:
+            messages = self.tool_calling_input_format(messages, tools)
+
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False
+        )
+
     def load_llm_and_tokenizer(self) -> None:
         """ fetch the model from huggingface and run it """
-        self.max_gpu_memory = self.convert_map(self.max_gpu_memory)
-
-        # ================== 拦截空字典 ==================
-        if not self.max_gpu_memory:
+        
+        # 拦截 max_gpu_memory 为 None 或空字典的情况
+        if self.max_gpu_memory:
+            self.max_gpu_memory = self.convert_map(self.max_gpu_memory)
+        else:
             self.max_gpu_memory = None
-        # ====================================================
 
-        self.auth_token = None #get_from_env("HF_AUTH_TOKENS")
+        self.auth_token = None
 
         """ only casual lms for now """
-        self.model = MODEL_CLASS[self.model_type].from_pretrained(
+        # 使用 AutoModelForCausalLM 直接加载，并强制使用 bfloat16 (Llama-3.1 标准精度)
+        self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             device_map="auto",
             max_memory=self.max_gpu_memory,
-            use_auth_token = self.auth_token,
-            torch_dtype=torch.float16  # 开启半精度，防止真实 OOM
+            use_auth_token=self.auth_token,
+            torch_dtype=torch.bfloat16
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
-            use_auth_token = self.auth_token
+            use_auth_token=self.auth_token
         )
-        self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
-        # ================== 核心修复：完美的 Llama-2 指令模板 ==================
-        if self.tokenizer.chat_template is None:
-            self.tokenizer.chat_template = (
-                "{% set system_message = '' %}"
-                "{% for message in messages %}"
-                "{% if message['role'] == 'system' %}"
-                "{% set system_message = '<<SYS>>\\n' + message['content'] + '\\n<</SYS>>\\n\\n' %}"
-                "{% endif %}"
-                "{% endfor %}"
-                
-                "{% for message in messages %}"
-                "{% if message['role'] == 'user' %}"
-                "{% if loop.first or (loop.index0 == 1 and messages[0]['role'] == 'system') %}"
-                "{{ '[INST] ' + system_message + message['content'] + ' [/INST]' }}"
-                "{% else %}"
-                "{{ '[INST] ' + message['content'] + ' [/INST]' }}"
-                "{% endif %}"
-                "{% elif message['role'] == 'assistant' %}"
-                "{{ message['content'] + ' ' }}"
-                "{% endif %}"
-                "{% endfor %}"
-            )
-        # ====================================================================
-    def parse_tool_callings(self, result):
-        pattern = r'\[\{.*?\}\]'
-        matches = re.findall(pattern, result)
-        return matches[-1]
+    def parse_tool_calls(self, result):
+        # Extract all JSON-array candidates, then pick the last one that can be
+        # normalized into [{"name": ..., "parameters": {...}}].
+        pattern = r'\[\s*\{[\s\S]*?\}\s*\]'
+        matches = re.findall(pattern, result, re.DOTALL)
+        if not matches:
+            return []
+
+        def normalize_calls(candidate):
+            if not isinstance(candidate, list):
+                return None
+
+            normalized = []
+            for item in candidate:
+                if not isinstance(item, dict):
+                    return None
+
+                # Case 1: already in expected format
+                if "name" in item:
+                    name = item.get("name")
+                    params = item.get("parameters", {})
+                    if not isinstance(name, str):
+                        return None
+                    if params is None:
+                        params = {}
+                    if not isinstance(params, dict):
+                        return None
+                    normalized.append({"name": name, "parameters": params})
+                    continue
+
+                # Case 2: OpenAI-ish format {"type":"function","function":{"name":...,"arguments":...}}
+                fn = item.get("function")
+                if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+                    name = fn["name"]
+                    args = fn.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    if args is None:
+                        args = {}
+                    if not isinstance(args, dict):
+                        args = {}
+                    normalized.append({"name": name, "parameters": args})
+                    continue
+
+                # Not a tool-call item
+                return None
+
+            return normalized
+
+        for m in reversed(matches):
+            try:
+                parsed = json.loads(m)
+            except Exception:
+                continue
+            normalized = normalize_calls(parsed)
+            if normalized is not None:
+                return normalized
+
+        return []
 
     def process(self,
                 agent_process,
@@ -104,20 +152,16 @@ class HfNativeLLM(BaseLLM):
         else:
             """ use the system prompt otherwise """
 
-            if tools:
-                messages = self.tool_calling_input_format(messages, tools)
-
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize = False
-            )
+            prompt = self.build_prompt(messages, tools)
 
             input_ids = self.tokenizer.encode(prompt, return_tensors="pt")
 
             attention_mask = input_ids != self.tokenizer.pad_token_id
-            # 直接使用模型的设备，避免 eval_device 为 None 导致的报错
-            input_ids = input_ids.to(self.model.device)
-            attention_mask = attention_mask.to(self.model.device)
+            
+            # 使用自适应的模型设备，防止 OOM 或设备不匹配错误
+            current_device = self.model.device
+            input_ids = input_ids.to(current_device)
+            attention_mask = attention_mask.to(current_device)
 
             outputs = self.generate(
                 input_ids = input_ids,
@@ -135,6 +179,7 @@ class HfNativeLLM(BaseLLM):
         output_ids = outputs["result"]
 
         """ devectorize the output """
+        # Llama-3.1 含有特殊系统 token，跳过它们能让输出更干净
         result = self.tokenizer.decode(output_ids, skip_special_tokens=True)
 
         if outputs["finished_flag"]: # finished flag is set as True
@@ -146,12 +191,10 @@ class HfNativeLLM(BaseLLM):
                 )
 
             if tools:
-                tool_calls = self.parse_tool_calls(
-                    result
-                )
+                tool_calls = self.parse_tool_calls(result)
                 agent_process.set_response(
                     Response(
-                        response_message = None,
+                        response_message = result,  # 关键修复 2：把 None 改回 result
                         tool_calls = tool_calls
                     )
                 )
@@ -196,7 +239,7 @@ class HfNativeLLM(BaseLLM):
                  beam_scores: torch.Tensor = None,
                  beam_attention_mask: torch.Tensor = None,
                  beam_size: int = None,
-                 max_new_tokens: int = 512,
+                 max_new_tokens: int = None,
                  search_mode: str = None,
                  start_idx: int = 0,
                  timestamp: int = None
@@ -236,41 +279,29 @@ class HfNativeLLM(BaseLLM):
         which token sequence is the most likely opposed to calculating the
         best token greedily
         """
+        current_device = self.model.device
 
         if beams is None or beam_scores is None or beam_attention_mask is None:
             beams = input_ids.repeat(beam_size, 1)
             beam_attention_mask = attention_mask.repeat(beam_size, 1)
-            # 同样替换为 self.model.device
-            beam_scores = torch.zeros(beam_size, device=self.model.device)
+            beam_scores = torch.zeros(beam_size, device=current_device)
 
         start_time = time.time()
-
         finished_flag = False
-
         idx = start_idx
+
+        # ================= Llama-3.1 Terminators 设定 =================
+        terminators = [self.tokenizer.eos_token_id]
+        eot_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+        if eot_id is not None and eot_id != self.tokenizer.unk_token_id:
+            terminators.append(eot_id)
+        # =============================================================
 
         for step in range(start_idx, max_new_tokens):
             with torch.no_grad():
                 # Obtain logits for the last tokens across all beams
                 outputs = self.model(beams, attention_mask=beam_attention_mask)
                 next_token_logits = outputs.logits[:, -1, :]
-
-                # ================== 新增修复：Repetition Penalty (重复惩罚) ==================
-                repetition_penalty = 1.15
-                for i in range(beams.shape[0]):
-                    for token_id in set(beams[i].tolist()):
-                        if next_token_logits[i, token_id] < 0:
-                            next_token_logits[i, token_id] *= repetition_penalty
-                        else:
-                            next_token_logits[i, token_id] /= repetition_penalty
-                # =========================================================================
-
-                # ================== 新增修复：Temperature Scaling (温度控制) ==================
-                # 你可以硬编码一个适合格式化输出的低温，比如 0.1
-                temperature = 0.1 
-                if temperature > 0.0:
-                    next_token_logits = next_token_logits / temperature
-                # =========================================================================
 
                 # Apply softmax to convert logits to probabilities
                 next_token_probs = torch.softmax(next_token_logits, dim=-1)
@@ -298,8 +329,13 @@ class HfNativeLLM(BaseLLM):
                 idx = step
                 break
 
-            # Check for completion
-            if torch.all(beams[:, -1] == self.tokenizer.eos_token_id):
+            # Check for completion (适配 Llama-3.1 多终止符)
+            last_tokens = beams[:, -1]
+            is_finished_mask = torch.zeros_like(last_tokens, dtype=torch.bool)
+            for term_id in terminators:
+                is_finished_mask |= (last_tokens == term_id)
+                
+            if torch.all(is_finished_mask):
                 idx = step
                 finished_flag = True
                 break

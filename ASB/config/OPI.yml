@@ -1,7 +1,7 @@
 injection_method: observation_prompt_injection
 attack_tool:
   - all
-  #- agg
+  # - agg
   # - non-agg
   #- test
 llms:
@@ -18,10 +18,8 @@ llms:
   # - ollama/mixtral:8x7b
   # - ollama/llama3:8b
   # - ollama/llama3.1:8b
-  #- /data2/hjh/Meta_SecAlign/Llama-2-SecAlign-V4-Merged
-  #- /data/hzq/models/vicuna1.5_7b
-  - /data/hjh/InjecAgent/Llama-2-7b-sgsd-merged
-
+  #- /data3/hzq/huggingface/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659
+  - /data2/lhj/model/models--Qwen--Qwen3-8B
 attack_types:
   # - combined_attack
   - context_ignoring
@@ -29,5 +27,5 @@ attack_types:
   # - escape_characters
   # - naive
 
-#defense_type: delimiters_defense   #ob_sandwich_defense  , ob_sandwich_defense, instructional_prevention
+#defense_type: delimiters_defense #ob_sandwich_defense, ob_sandwich_defense, instructional_prevention
 # suffix: test

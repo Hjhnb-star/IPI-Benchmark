@@ -3,8 +3,9 @@
 # All abstractions will be implemented here
 
 from .llm_classes.model_registry import MODEL_REGISTRY
-#from .llm_classes.hf_vicuna_llm import HfVicunaLLM
 from .llm_classes.hf_native_llm import HfNativeLLM
+from .llm_classes.qwen3_hf_llm import Qwen3HfLLM
+
 # standard implementation of LLM methods
 from .llm_classes.ollama_llm import OllamaLLM
 from .llm_classes.vllm import vLLM
@@ -14,10 +15,12 @@ class LLMKernel:
                  llm_name: str,
                  max_gpu_memory: dict = None,
                  eval_device: str = None,
-                 max_new_tokens: int = None,
+                 max_new_tokens: int = 256,
                  log_mode: str = "console",
-                 use_backend: str = None
+                 use_backend: str = None,
+                 enable_thinking: bool = None
         ):
+        llm_name_lower = llm_name.lower()
 
         # For API-based LLM
         if llm_name in MODEL_REGISTRY.keys():
@@ -41,16 +44,24 @@ class LLMKernel:
                     llm_name=llm_name,
                     max_gpu_memory=max_gpu_memory,
                     eval_device=eval_device,
-                    max_new_tokens=512,
+                    max_new_tokens=max_new_tokens,
                     log_mode=log_mode
                 )
+            elif "qwen3" in llm_name_lower:
+                self.model = Qwen3HfLLM(
+                    llm_name=llm_name,
+                    max_gpu_memory=max_gpu_memory,
+                    eval_device=eval_device,
+                    max_new_tokens=max_new_tokens,
+                    log_mode=log_mode,
+                    enable_thinking=enable_thinking
+                )
             else: # use huggingface LLM without backend
-            #这个是我用于适配vicuna，到时候改为hfnativellm
                 self.model = HfNativeLLM(
                     llm_name=llm_name,
                     max_gpu_memory=max_gpu_memory,
                     eval_device=eval_device,
-                    max_new_tokens=512,
+                    max_new_tokens=max_new_tokens,
                     log_mode=log_mode
                 )
 

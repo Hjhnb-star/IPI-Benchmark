@@ -5,6 +5,7 @@ attack_tool:
   # - non-agg
 
 write_db: false # true,false
+enable_thinking: false # Qwen3 only: true=thinking mode, false=non-thinking mode
 
 llms:
   # - gpt-4o-mini
@@ -18,12 +19,14 @@ llms:
   # - ollama/llama3:70b
   # - ollama/llama3.1:70b
   # - ollama/mixtral:8x7b
-  - ollama/llama3:8b
+  #- ollama/llama3:8b
   # - ollama/llama3.1:8b
+  #- /data3/hzq/huggingface/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659
+  - /data2/lhj/model/models--Qwen--Qwen3-8B
 
 attack_types:
   - combined_attack
 
 
-defense_type: dynamic_prompt_rewriting # delimiters_defense, direct_paraphrase_defense, instructional_prevention, dynamic_prompt_rewriting
+#defense_type: delimiters_defense #dynamic_prompt_rewriting  , direct_paraphrase_defense, instructional_prevention, dynamic_prompt_rewriting
 # suffix: test

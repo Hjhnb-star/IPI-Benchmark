@@ -15,19 +15,17 @@ class BaseLLM(ABC):
                  llm_name: str,
                  max_gpu_memory: dict = None,
                  eval_device: str = None,
-                 max_new_tokens: int = 512,
-                 log_mode: str = "console"
+                 max_new_tokens: int = 256,
+                 log_mode: str = "console",
+                 enable_thinking: bool = None
         ):
-        if max_gpu_memory is None or not max_gpu_memory:
-            max_gpu_memory = None
-            self.max_gpu_memory = None
-        else:
-            self.max_gpu_memory = self.convert_map(max_gpu_memory)        # 单卡常用额度
+        self.max_gpu_memory = max_gpu_memory
         self.eval_device = eval_device
-        self.max_new_tokens = 512
+        self.max_new_tokens = max_new_tokens
+        self.enable_thinking = enable_thinking
 
         self.log_mode = log_mode
-        self.model_type = "causal_lm"
+
         self.model_name = llm_name
         self.context_manager = SimpleContextManager()
 
@@ -41,8 +39,6 @@ class BaseLLM(ABC):
 
     def convert_map(self, map: dict) -> dict:
         """ helper utility to convert the keys of a map to int """
-        if map is None:
-            return {}
         new_map = {}
         for k,v in map.items():
             new_map[int(k)] = v

@@ -16,20 +16,34 @@ import re
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 # logger = logging.getLogger(__name__)
 
+
+def _parse_optional_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("enable_thinking must be true/false")
+
 def parse_global_args():
     """ Construct help message and parse argumets using argparse """
     parser = argparse.ArgumentParser(description="Parse global parameters")
     parser.add_argument('--llm_name', type=str, default="gemma-2b-it", help="Specify the LLM name of AIOS")
     parser.add_argument('--max_gpu_memory', type=json.loads, help="Max gpu memory allocated for the LLM")
     parser.add_argument('--eval_device', type=str, help="Evaluation device (example: \"conda:0\" for 2 GPUs)")
-    parser.add_argument('--max_new_tokens', type=int, default=256, help="The maximum number of new tokens for generation")
+    parser.add_argument('--max_new_tokens', type=int, default=1024, help="The maximum number of new tokens for generation")
     parser.add_argument("--scheduler_log_mode", type=str, default="console", choices=["console", "file"])
     parser.add_argument("--agent_log_mode", type=str, default="console", choices=["console", "file"])
     parser.add_argument("--llm_kernel_log_mode", type=str, default="console", choices=["console", "file"])
     parser.add_argument("--use_backend", type=str, default = None, choices=['None', "ollama", "vllm"])
     parser.add_argument("--workflow_mode", type=str, default = 'automatic', choices=["manual", "automatic"])
     parser.add_argument("--attacker_tools_path", type=str, default = 'data/all_attack_tools_non_aggressive.jsonl', help="Path to the Attacker Tool jsonl file")
-    parser.add_argument("--tasks_path", type=str, default = 'data/agent_task2.jsonl', help="Path to the task file")
+    parser.add_argument("--tasks_path", type=str, default = 'data/agent_task1.jsonl', help="Path to the task file")
     parser.add_argument("--tools_info_path", type=str, default = 'data/all_normal_tools.jsonl', help="Path to the normal tools info file")
     parser.add_argument("--observation_prompt_injection", action='store_true')
     parser.add_argument("--plan_attack", action='store_true')
@@ -50,6 +64,8 @@ def parse_global_args():
     parser.add_argument("--write_db", action='store_true')
     parser.add_argument("--read_db", action='store_true')
     parser.add_argument("--res_file", type=str, default = 'logs/result_file.log', help="Path to the result file")
+    parser.add_argument("--enable_thinking", type=_parse_optional_bool, default=None,
+                        help="Qwen3 only: true for thinking mode, false for non-thinking mode")
 
     return parser
 
