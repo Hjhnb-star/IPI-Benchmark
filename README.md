@@ -16,7 +16,12 @@ PYTHONPATH=. nohup python3 -u src/evaluate_prompted_agent.py \  #处理clean是e
   --use_cache > lora_short.log 2>&1 &
 
 
-对于ASB代码，指令是python scripts/agent_attack.py --cfg_path config/OPI.yml
-你需要在config/opi.yml文件里修改模型的地址，更改模型。
-我记得其他测试集我直接把api key硬编码了，但是这个asb我还是保持os获取，可以查看main_attacker1.py查看
+对于ASB代码，指令是
+python scripts/agent_attack.py --cfg_path config/OPI.yml  #测试攻击
+python scripts/agent_attack.py --cfg_path config/clean.yml  #正常任务
+你需要在config/opi.yml和config/clean.yaml文件里修改模型的地址，更改模型，以及里面有防御策略delimit，你需要把注释删除即可使用。
+我现在测试的是两个任务，你需要测试完整任务的话，修改/data2/hjh/IPI-Benchmark/ASB/aios/utils/utils.py文件中的parser.add_argument("--tasks_path", type=str, default = 'data/agent_task1.jsonl', help="Path to the task file") 改为parser.add_argument("--tasks_path", type=str, default = 'data/agent_task.jsonl', help="Path to the task file")
+你先测试qwen模型，llama3在评测正常任务的时候有问题，还需要再修改一下
+这个版本的asb是测试llama3和qwen3，llama2需要另一个版本的asb我还没上传。
+
 
